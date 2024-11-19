@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -69,4 +70,15 @@ func Disconnect() {
 	if err := client.Disconnect(context.TODO()); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func CreatePost(collection *mongo.Collection, post primitive.D) error {
+
+	result, err := collection.InsertOne(context.TODO(), post)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Post created with ID %v\n", result.InsertedID)
+	return nil
 }
