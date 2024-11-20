@@ -12,12 +12,13 @@ import (
 const PRIVATE_KEY = "/home/anshugoy/sashan/private-key.pem"
 const PUBLIC_KEY = "/home/anshugoy/sashan/public-key.pem"
 
-func GenerateJWT() (string, error) {
+func GenerateJWT(username string) (string, error) {
 	var filePath string = PRIVATE_KEY
 	token := jwt.NewWithClaims(jwt.SigningMethodES256,
 		jwt.MapClaims{
-			"iss": "sashan.org",
-			"sub": "sashan",
+			"iss":      "sashan.org",
+			"sub":      "sashan",
+			"username": username,
 		})
 
 	keydata, err := os.ReadFile(filePath)

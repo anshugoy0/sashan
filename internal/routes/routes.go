@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -47,12 +49,11 @@ func JwtAuthMiddleware(next http.Handler) http.Handler {
 				return nil, http.ErrNotSupported
 			}
 			secretKey, _ := auth.ParsePublicKey()
-			print(secretKey)
 			return secretKey, nil
 		})
 
 		if err != nil {
-			print(err)
+			fmt.Println(err)
 		}
 
 		if err != nil || !token.Valid {
@@ -60,6 +61,15 @@ func JwtAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			http.Error(w, "Claim Failed", http.StatusInternalServerError)
+			return
+		}
+		username := claims["username"]
+
+		ctx := context.WithValue(r.Context(), "username", username)
+		r = r.WithContext(ctx)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -83,7 +93,7 @@ func signinHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(err.Error()))
 	} else {
-		token, err := auth.GenerateJWT()
+		token, err := auth.GenerateJWT(username)
 		if err != nil {
 			fmt.Println(err.Error())
 			w.WriteHeader(http.StatusInternalServerError)
@@ -129,6 +139,14 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func postHandler(w http.ResponseWriter, r *http.Request) {
+
+	username, ok := r.Context().Value("username").(string)
+
+	if !ok {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
 	if r.Method == "POST" {
 		var body schema.PostBody
 		err := json.NewDecoder(r.Body).Decode(&body)
@@ -142,20 +160,28 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		collection := db.GetCollection(constants.MAIN_DATABASE, constants.POSTS_COLLECTION)
 
 		post := schema.Post{
+			Username: username,
 			Text:     body.Text,
 			Likes:    0,
 			Comments: []string{},
 		}
 
-		primitive_post := primitive.D{
-			{Key: "text", Value: post.Text},
-			{Key: "likes", Value: post.Likes},
-			{Key: "comments", Value: post.Comments},
+		bsondata, err := bson.Marshal(post)
+		if err != nil {
+			fmt.Println("Unable to parse post: ", err)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+
+		var primitive_post primitive.D
+		err = bson.Unmarshal(bsondata, &primitive_post)
+		if err != nil {
+			fmt.Println("Unable to unmarshal post: ", err)
+			w.WriteHeader(http.StatusInternalServerError)
 		}
 
 		err = db.CreatePost(collection, primitive_post)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+
 			w.Write([]byte("Failed to create post"))
 		} else {
 			w.Write([]byte("Post Created Successfully"))
