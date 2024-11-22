@@ -25,6 +25,7 @@ func InitializeRoutes() *mux.Router {
 	router.HandleFunc("/signup", signupHandler).Methods("POST")
 	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("POST")
 	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("GET")
+	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("DELETE")
 
 	return router
 }
@@ -162,6 +163,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("failed to post"))
+			return
 		}
 
 		//create object to push to DB
@@ -176,6 +178,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			fmt.Println("Unable to parse post: ", err)
 			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 
 		var primitive_post primitive.D
@@ -183,12 +186,13 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			fmt.Println("Unable to unmarshal post: ", err)
 			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 
 		// Push to DB
 		err = db.CreateDocument(collection, primitive_post)
 		if err != nil {
-
+			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("Failed to create post"))
 		} else {
 			w.Write([]byte("Post Created Successfully"))
@@ -217,6 +221,32 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(posts)
+		}
+	} else if r.Method == "DELETE" {
+		query := r.URL.Query()
+		id := query.Get("postid")
+
+		objId, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Incorrect ID provided"))
+			return
+		}
+
+		filter := bson.M{
+			"_id": objId,
+		}
+
+		result, err := db.DeleteDocument(collection, filter)
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Unable to delete"))
+		} else if result != nil && result.DeletedCount == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Nothing got deleted"))
+		} else {
+			w.Write([]byte("Successfully deleted"))
 		}
 
 	}

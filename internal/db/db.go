@@ -102,3 +102,12 @@ func GetDocument(collection *mongo.Collection, filter primitive.D) ([]bson.D, er
 
 	return results, nil
 }
+
+func DeleteDocument(collection *mongo.Collection, filter primitive.M) (*mongo.DeleteResult, error) {
+	result, err := collection.DeleteOne(context.TODO(), filter)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
