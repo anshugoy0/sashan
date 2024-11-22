@@ -24,6 +24,7 @@ func InitializeRoutes() *mux.Router {
 	router.HandleFunc("/signin", signinHandler).Methods("POST")
 	router.HandleFunc("/signup", signupHandler).Methods("POST")
 	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("POST")
+	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("GET")
 
 	return router
 }
@@ -144,26 +145,31 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 
 	if !ok {
 		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("failed to post"))
 		return
 	}
 
+	// Setup mongodb connection
+	uri := constants.MONGODB_URI
+	db.Connect(uri)
+	defer db.Disconnect()
+	collection := db.GetCollection(constants.MAIN_DATABASE, constants.POSTS_COLLECTION)
+
 	if r.Method == "POST" {
+		// get the request body
 		var body schema.PostBody
 		err := json.NewDecoder(r.Body).Decode(&body)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("failed to post"))
 		}
-		uri := constants.MONGODB_URI
-		db.Connect(uri)
-		defer db.Disconnect()
-		collection := db.GetCollection(constants.MAIN_DATABASE, constants.POSTS_COLLECTION)
 
+		//create object to push to DB
 		post := schema.Post{
 			Username: username,
 			Text:     body.Text,
 			Likes:    0,
-			Comments: []string{},
+			Comments: []schema.Comment{},
 		}
 
 		bsondata, err := bson.Marshal(post)
@@ -179,12 +185,39 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 
-		err = db.CreatePost(collection, primitive_post)
+		// Push to DB
+		err = db.CreateDocument(collection, primitive_post)
 		if err != nil {
 
 			w.Write([]byte("Failed to create post"))
 		} else {
 			w.Write([]byte("Post Created Successfully"))
 		}
+	} else if r.Method == "GET" {
+
+		query := r.URL.Query()
+		username := query.Get("username")
+
+		filter := bson.D{
+			{Key: "username", Value: username},
+		}
+		posts_primitive, err := db.GetDocument(collection, filter)
+		posts := []map[string]interface{}{}
+		for _, post_primitive := range posts_primitive {
+			post_map := make(map[string]interface{})
+			for _, elem := range post_primitive {
+				post_map[elem.Key] = elem.Value
+			}
+			posts = append(posts, post_map)
+		}
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Unable to get post"))
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(posts)
+		}
+
 	}
 }

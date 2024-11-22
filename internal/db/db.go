@@ -72,13 +72,33 @@ func Disconnect() {
 	}
 }
 
-func CreatePost(collection *mongo.Collection, post primitive.D) error {
+func CreateDocument(collection *mongo.Collection, doc primitive.D) error {
 
-	result, err := collection.InsertOne(context.TODO(), post)
+	result, err := collection.InsertOne(context.TODO(), doc)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Post created with ID %v\n", result.InsertedID)
+	fmt.Printf("document created with ID %v\n", result.InsertedID)
 	return nil
+}
+
+func GetDocument(collection *mongo.Collection, filter primitive.D) ([]bson.D, error) {
+
+	cursor, err := collection.Find(context.TODO(), filter)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []bson.D
+	for cursor.Next(context.TODO()) {
+		var result bson.D
+		err := cursor.Decode(&result)
+		if err != nil {
+			continue
+		}
+		results = append(results, result)
+	}
+
+	return results, nil
 }
