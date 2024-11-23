@@ -23,9 +23,11 @@ func InitializeRoutes() *mux.Router {
 	router.HandleFunc("/", homeHandler).Methods("GET")
 	router.HandleFunc("/signin", signinHandler).Methods("POST")
 	router.HandleFunc("/signup", signupHandler).Methods("POST")
+
 	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("POST")
 	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("GET")
 	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("DELETE")
+	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("PATCH")
 
 	return router
 }
@@ -200,28 +202,56 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 	} else if r.Method == "GET" {
 
 		query := r.URL.Query()
-		username := query.Get("username")
 
-		filter := bson.D{
-			{Key: "username", Value: username},
-		}
-		posts_primitive, err := db.GetDocument(collection, filter)
-		posts := []map[string]interface{}{}
-		for _, post_primitive := range posts_primitive {
-			post_map := make(map[string]interface{})
-			for _, elem := range post_primitive {
-				post_map[elem.Key] = elem.Value
+		if query.Has("username") {
+			username := query.Get("username")
+			filter := bson.D{
+				{Key: "username", Value: username},
 			}
-			posts = append(posts, post_map)
+			posts_primitive, err := db.GetDocuments(collection, filter)
+			posts := []map[string]interface{}{}
+			for _, post_primitive := range posts_primitive {
+				post_map := make(map[string]interface{})
+				for _, elem := range post_primitive {
+					post_map[elem.Key] = elem.Value
+				}
+				posts = append(posts, post_map)
+			}
+
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("Unable to get post"))
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(posts)
+			}
+		} else if query.Has("postid") {
+			id := query.Get("postid")
+			objId, err := primitive.ObjectIDFromHex(id)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte("Incorrect ID"))
+				return
+			}
+
+			filter := bson.M{
+				"_id": objId,
+			}
+
+			post, err := db.GetDocument(collection, filter)
+
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("Unable to fetch post"))
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(post)
+			}
+		} else {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Unable to get, provide username of ID"))
 		}
 
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Unable to get post"))
-		} else {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(posts)
-		}
 	} else if r.Method == "DELETE" {
 		query := r.URL.Query()
 		id := query.Get("postid")
@@ -247,6 +277,50 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte("Nothing got deleted"))
 		} else {
 			w.Write([]byte("Successfully deleted"))
+		}
+	} else if r.Method == "PATCH" {
+		query := r.URL.Query()
+		id := query.Get("postid")
+		var body bson.M
+		err := json.NewDecoder(r.Body).Decode(&body)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Check request parameters"))
+			return
+		}
+
+		objId, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Incorrect Id provided"))
+		}
+
+		filter := bson.M{
+			"_id": objId,
+		}
+
+		text, ok := body["Text"]
+		if !ok {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Unable to read the Text"))
+		}
+
+		update := bson.M{
+			"$set": bson.M{
+				"text": text,
+			},
+		}
+
+		result, err := db.UpdateDocument(collection, filter, update)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Unable to update post"))
+			return
+		} else if result.ModifiedCount == 0 {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Nothing got modified"))
+		} else {
+			w.Write([]byte("Modified successfully"))
 		}
 
 	}

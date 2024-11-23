@@ -1,3 +1,5 @@
+// This file is to store all the functions that interact with MongoDB
+
 package db
 
 import (
@@ -83,7 +85,7 @@ func CreateDocument(collection *mongo.Collection, doc primitive.D) error {
 	return nil
 }
 
-func GetDocument(collection *mongo.Collection, filter primitive.D) ([]bson.D, error) {
+func GetDocuments(collection *mongo.Collection, filter primitive.D) ([]bson.D, error) {
 
 	cursor, err := collection.Find(context.TODO(), filter)
 	if err != nil {
@@ -103,6 +105,14 @@ func GetDocument(collection *mongo.Collection, filter primitive.D) ([]bson.D, er
 	return results, nil
 }
 
+func GetDocument(collection *mongo.Collection, filter primitive.M) (bson.M, error) {
+	var result bson.M
+	err := collection.FindOne(context.TODO(), filter).Decode(&result)
+
+	return result, err
+
+}
+
 func DeleteDocument(collection *mongo.Collection, filter primitive.M) (*mongo.DeleteResult, error) {
 	result, err := collection.DeleteOne(context.TODO(), filter)
 	if err != nil {
@@ -110,4 +120,10 @@ func DeleteDocument(collection *mongo.Collection, filter primitive.M) (*mongo.De
 	}
 
 	return result, nil
+}
+
+func UpdateDocument(collection *mongo.Collection, filter bson.M, update bson.M) (*mongo.UpdateResult, error) {
+	result, err := collection.UpdateOne(context.TODO(), filter, update)
+
+	return result, err
 }
