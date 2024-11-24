@@ -74,7 +74,7 @@ func Disconnect() {
 	}
 }
 
-func CreateDocument(collection *mongo.Collection, doc primitive.D) error {
+func CreateDocument(collection *mongo.Collection, doc primitive.M) error {
 
 	result, err := collection.InsertOne(context.TODO(), doc)
 	if err != nil {

@@ -168,12 +168,25 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		parent_post_objid, err := primitive.ObjectIDFromHex(body.Parentpost)
+
+		if parent_post_objid.IsZero() {
+			fmt.Println("There is not parent of the post")
+		} else if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Incorrect parent post ID"))
+			return
+		}
+
 		//create object to push to DB
+		post_id := primitive.NewObjectID()
 		post := schema.Post{
-			Username: username,
-			Text:     body.Text,
-			Likes:    0,
-			Comments: []schema.Comment{},
+			ID:         post_id,
+			Username:   username,
+			Text:       body.Text,
+			Likes:      0,
+			Childposts: []primitive.ObjectID{},
+			Parentpost: parent_post_objid,
 		}
 
 		bsondata, err := bson.Marshal(post)
@@ -183,22 +196,60 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var primitive_post primitive.D
+		var primitive_post primitive.M
 		err = bson.Unmarshal(bsondata, &primitive_post)
 		if err != nil {
-			fmt.Println("Unable to unmarshal post: ", err)
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Invalid input"))
 			return
 		}
 
-		// Push to DB
+		// Push post to DB
 		err = db.CreateDocument(collection, primitive_post)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("Failed to create post"))
-		} else {
-			w.Write([]byte("Post Created Successfully"))
 		}
+
+		if parent_post_objid.IsZero() {
+			w.Write([]byte("New post created successfully"))
+			return
+		}
+
+		// Update parent post
+		child_update := bson.M{
+			"$push": bson.M{
+				"cposts": post_id,
+			},
+		}
+
+		filter := bson.M{
+			"_id": parent_post_objid,
+		}
+
+		result, err := db.UpdateDocument(collection, filter, child_update)
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Unable to add post"))
+
+			result_delete, err := db.DeleteDocument(collection, bson.M{"_id": post_id})
+			if err != nil {
+				fmt.Printf("Unable to revert post with id %v\n", post_id)
+			} else if result_delete.DeletedCount == 0 {
+				fmt.Println("Post is not deleted")
+			} else {
+				fmt.Printf("Post with ID %v got deleted\n", post_id)
+			}
+
+			return
+		} else if result.ModifiedCount == 0 {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Nothing got modified"))
+		} else {
+			w.Write([]byte("Subpost created successfully"))
+		}
+
 	} else if r.Method == "GET" {
 
 		query := r.URL.Query()

@@ -1,5 +1,7 @@
 package schema
 
+import "go.mongodb.org/mongo-driver/bson/primitive"
+
 type User struct {
 	Username string `bson:"title"`
 	Password string `bson:"password"`
@@ -7,27 +9,15 @@ type User struct {
 }
 
 type Post struct {
-	Username string    `bson:"username"`
-	Text     string    `bson:"text"`
-	Likes    int       `bson:"likes"`
-	Comments []Comment `bson:"comments"`
-}
-
-type Comment struct {
-	CUsername   string       `bson:"cusername"`
-	Text        string       `bson:"text"`
-	Likes       int          `bson:"likes"`
-	SubComments []SubComment `bson:"subcomments"`
-	Valid       bool         `bson:"valid" default:"true"`
-}
-
-type SubComment struct {
-	SCUsername string `bson:"scusername"`
-	Text       string `bson:"text"`
-	Likes      int    `bson:"likes"`
-	Valid      bool   `bson:"valid" default:"true"`
+	ID         primitive.ObjectID   `bson:"_id"`
+	Username   string               `bson:"username"`
+	Text       string               `bson:"text"`
+	Likes      int                  `bson:"likes"`
+	Childposts []primitive.ObjectID `bson:"cposts"`
+	Parentpost primitive.ObjectID   `bson:"ppost"`
 }
 
 type PostBody struct {
-	Text string `bson:"text"`
+	Text       string `bson:"text"`
+	Parentpost string `bson:"ppost,omitempty"`
 }
