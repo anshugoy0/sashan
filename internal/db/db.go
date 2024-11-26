@@ -127,3 +127,7 @@ func UpdateDocument(collection *mongo.Collection, filter bson.M, update bson.M) 
 
 	return result, err
 }
+
+func GetClient() *mongo.Client {
+	return client
+}

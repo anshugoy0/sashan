@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sashan/internal/auth"
 	"sashan/internal/constants"
@@ -24,10 +25,10 @@ func InitializeRoutes() *mux.Router {
 	router.HandleFunc("/signin", signinHandler).Methods("POST")
 	router.HandleFunc("/signup", signupHandler).Methods("POST")
 
-	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("POST")
-	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("GET")
-	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("DELETE")
-	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("PATCH")
+	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("POST", "GET", "DELETE", "PATCH")
+
+	router.Handle("/like", JwtAuthMiddleware(http.HandlerFunc(likeHandler))).Methods("POST")
+	router.Handle("/unlike", JwtAuthMiddleware(http.HandlerFunc(likeHandler))).Methods("POST")
 
 	return router
 }
@@ -88,9 +89,6 @@ func signinHandler(w http.ResponseWriter, r *http.Request) {
 	username := query.Get("username")
 	password := query.Get("password")
 
-	uri := constants.MONGODB_URI
-	db.Connect(uri)
-	defer db.Disconnect()
 	collection := db.GetCollection(constants.MAIN_DATABASE, constants.USERS_COLLECTION)
 	usr, err := db.GetUser(collection, username, password)
 	if err != nil {
@@ -116,9 +114,6 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 	password := query.Get("password")
 	dob := query.Get("dob")
 
-	uri := constants.MONGODB_URI
-	db.Connect(uri)
-	defer db.Disconnect()
 	collection := db.GetCollection(constants.MAIN_DATABASE, constants.USERS_COLLECTION)
 
 	user := schema.User{
@@ -152,10 +147,6 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Setup mongodb connection
-	uri := constants.MONGODB_URI
-	db.Connect(uri)
-	defer db.Disconnect()
 	collection := db.GetCollection(constants.MAIN_DATABASE, constants.POSTS_COLLECTION)
 
 	if r.Method == "POST" {
@@ -375,4 +366,138 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 	}
+}
+
+func likeHandler(w http.ResponseWriter, r *http.Request) {
+
+	path := r.URL.Path
+
+	// Retrieve all request information
+	query := r.URL.Query()
+	postid := query.Get("postid")
+
+	objid, err := primitive.ObjectIDFromHex(postid) // Convert to useful form
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Invalid post id"))
+	}
+
+	username, ok := r.Context().Value("username").(string)
+	if !ok {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("failed to post"))
+		return
+	}
+
+	post_collection := db.GetCollection(constants.MAIN_DATABASE, constants.POSTS_COLLECTION)
+	user_collection := db.GetCollection(constants.MAIN_DATABASE, constants.USERS_COLLECTION)
+
+	// Check post like status
+	user_filter := bson.M{
+		"username": username,
+	}
+
+	user, err := db.GetDocument(user_collection, user_filter)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Unable to find user"))
+		return
+	}
+
+	var User schema.User
+	user_bytes, _ := bson.Marshal(user)
+	err = bson.Unmarshal(user_bytes, &User)
+	if err != nil {
+		fmt.Printf("Unable to parse user info: %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Unable to Like post"))
+		return
+	}
+
+	isLiked := false
+	if len(User.Interactions.LikedPosts) != 0 {
+		likedposts := User.Interactions.LikedPosts
+		for _, s := range likedposts {
+			if s == objid {
+				isLiked = true
+			}
+		}
+	} else {
+		fmt.Println("Not liked")
+	}
+
+	var update_post bson.M
+	var update_user bson.M
+	if path == "/like" {
+		if isLiked {
+			w.Write([]byte("Post already liked"))
+			return
+		}
+		update_post = bson.M{
+			"$inc": bson.M{
+				"likes": 1,
+			},
+		}
+		update_user = bson.M{
+			"$push": bson.M{
+				"interactions.likedposts": objid,
+			},
+		}
+	} else if path == "/unlike" {
+		if !isLiked {
+			w.Write([]byte("Post already unliked"))
+			return
+		}
+		update_post = bson.M{
+			"$inc": bson.M{
+				"likes": -1,
+			},
+		}
+		update_user = bson.M{
+			"$pull": bson.M{
+				"interactions.likedposts": objid,
+			},
+		}
+	}
+
+	// Update the post likes info
+	filter_post := bson.M{
+		"_id": objid,
+	}
+
+	client := db.GetClient()
+	session, err := client.StartSession()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer session.EndSession(context.TODO())
+	err = session.StartTransaction()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_, err = post_collection.UpdateOne(context.TODO(), filter_post, update_post)
+	if err != nil {
+		session.AbortTransaction(context.TODO())
+		log.Fatal(err)
+	}
+
+	// Update the user interaction info
+	_, err = user_collection.UpdateOne(context.TODO(), user_filter, update_user)
+	if err != nil {
+		session.AbortTransaction(context.TODO())
+		log.Fatal(err)
+	}
+
+	err = session.CommitTransaction(context.TODO())
+	if err != nil {
+		log.Fatal(err)
+	}
+	if path == "/like" {
+		w.Write([]byte("Liked successfully"))
+	} else if path == "/unlike" {
+		w.Write([]byte("Unliked successfully"))
+	}
+
 }
