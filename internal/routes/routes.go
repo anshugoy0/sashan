@@ -18,6 +18,13 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+const (
+	LIKE_ROUTE     = "/like"
+	UNLIKE_ROUTE   = "/unlike"
+	FOLLOW_ROUTE   = "/follow"
+	UNFOLLOW_ROUTE = "/unfollow"
+)
+
 func InitializeRoutes() *mux.Router {
 	router := mux.NewRouter()
 
@@ -27,8 +34,11 @@ func InitializeRoutes() *mux.Router {
 
 	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("POST", "GET", "DELETE", "PATCH")
 
-	router.Handle("/like", JwtAuthMiddleware(http.HandlerFunc(likeHandler))).Methods("POST")
-	router.Handle("/unlike", JwtAuthMiddleware(http.HandlerFunc(likeHandler))).Methods("POST")
+	router.Handle(LIKE_ROUTE, JwtAuthMiddleware(http.HandlerFunc(likeHandler))).Methods("POST")
+	router.Handle(UNLIKE_ROUTE, JwtAuthMiddleware(http.HandlerFunc(likeHandler))).Methods("POST")
+
+	router.Handle(FOLLOW_ROUTE, JwtAuthMiddleware(http.HandlerFunc(followHandler))).Methods("POST")
+	router.Handle(UNFOLLOW_ROUTE, JwtAuthMiddleware(http.HandlerFunc(followHandler))).Methods("POST")
 
 	return router
 }
@@ -428,7 +438,7 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 
 	var update_post bson.M
 	var update_user bson.M
-	if path == "/like" {
+	if path == LIKE_ROUTE {
 		if isLiked {
 			w.Write([]byte("Post already liked"))
 			return
@@ -443,7 +453,7 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 				"interactions.likedposts": objid,
 			},
 		}
-	} else if path == "/unlike" {
+	} else if path == UNLIKE_ROUTE {
 		if !isLiked {
 			w.Write([]byte("Post already unliked"))
 			return
@@ -494,10 +504,109 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if path == "/like" {
+	if path == LIKE_ROUTE {
 		w.Write([]byte("Liked successfully"))
-	} else if path == "/unlike" {
+	} else if path == UNLIKE_ROUTE {
 		w.Write([]byte("Unliked successfully"))
 	}
+
+}
+
+func followHandler(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	follower_username, ok := r.Context().Value("username").(string)
+	followed_username := query.Get("username")
+
+	if !ok {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Failed to follow"))
+		return
+	}
+
+	collection := db.GetCollection(constants.MAIN_DATABASE, constants.USERS_COLLECTION)
+
+	filter_follower := bson.M{
+		"username": follower_username,
+	}
+
+	filter_followed := bson.M{
+		"username": followed_username,
+	}
+
+	var update_follower bson.M
+	var update_followed bson.M
+
+	if r.URL.Path == FOLLOW_ROUTE {
+		update_follower = bson.M{
+			"$addToSet": bson.M{
+				"following": followed_username,
+			},
+		}
+
+		update_followed = bson.M{
+			"$addToSet": bson.M{
+				"followers": follower_username,
+			},
+		}
+	} else if r.URL.Path == UNFOLLOW_ROUTE {
+		update_follower = bson.M{
+			"$pull": bson.M{
+				"following": followed_username,
+			},
+		}
+
+		update_followed = bson.M{
+			"$pull": bson.M{
+				"followers": follower_username,
+			},
+		}
+	}
+
+	client := db.GetClient()
+
+	session, err := client.StartSession()
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Failed to follow"))
+		return
+	}
+	defer session.EndSession(context.TODO())
+
+	err = session.StartTransaction()
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Failed to follow"))
+		return
+	}
+
+	_, err = collection.UpdateOne(context.TODO(), filter_follower, update_follower)
+	if err != nil {
+		session.AbortTransaction(context.TODO())
+		fmt.Printf("Error: %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Failed to follow"))
+		return
+	}
+
+	_, err = collection.UpdateOne(context.TODO(), filter_followed, update_followed)
+	if err != nil {
+		session.AbortTransaction(context.TODO())
+		fmt.Printf("Error: %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Failed to follow"))
+		return
+	}
+
+	err = session.CommitTransaction(context.TODO())
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Failed to follow"))
+		return
+	}
+
+	w.Write([]byte("Operation successfully"))
 
 }

@@ -3,11 +3,13 @@ package schema
 import "go.mongodb.org/mongo-driver/bson/primitive"
 
 type User struct {
-	ID           primitive.ObjectID `bson:"_id"`
-	Username     string             `bson:"username"`
-	Password     string             `bson:"password"`
-	DOB          string             `bson:"dob"`
-	Interactions Interaction        `bson:"interactions"`
+	ID           primitive.ObjectID   `bson:"_id"`
+	Username     string               `bson:"username"`
+	Password     string               `bson:"password"`
+	DOB          string               `bson:"dob"`
+	Interactions Interaction          `bson:"interactions"`
+	Followers    []primitive.ObjectID `bson:"followers"`
+	Following    []primitive.ObjectID `bson:"following"`
 }
 
 type Interaction struct {
