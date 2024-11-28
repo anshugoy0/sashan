@@ -1,5 +1,7 @@
 package routes
 
+// Package routes handles all the routing logic for the application
+
 import (
 	"context"
 	"encoding/json"
@@ -48,6 +50,7 @@ func JwtAuthMiddleware(next http.Handler) http.Handler {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			http.Error(w, "Authorization header missing", http.StatusUnauthorized)
+			return
 		}
 
 		parts := strings.Split(authHeader, " ")
@@ -94,7 +97,6 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func signinHandler(w http.ResponseWriter, r *http.Request) {
-
 	query := r.URL.Query()
 	username := query.Get("username")
 	password := query.Get("password")
@@ -104,18 +106,19 @@ func signinHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(err.Error()))
-	} else {
-		token, err := auth.GenerateJWT(username)
-		if err != nil {
-			fmt.Println(err.Error())
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Unable to SignIn"))
-		} else {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"token": token, "msg": fmt.Sprintf("Signed in successfully to " + usr["username"].(string))})
-		}
+		return
 	}
 
+	token, err := auth.GenerateJWT(username)
+	if err != nil {
+		fmt.Println(err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Unable to SignIn"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"token": token, "msg": fmt.Sprintf("Signed in successfully to " + usr["username"].(string))})
 }
 
 func signupHandler(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +151,6 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func postHandler(w http.ResponseWriter, r *http.Request) {
-
 	username, ok := r.Context().Value("username").(string)
 
 	if !ok {
@@ -172,7 +174,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		parent_post_objid, err := primitive.ObjectIDFromHex(body.Parentpost)
 
 		if parent_post_objid.IsZero() {
-			fmt.Println("There is not parent of the post")
+			fmt.Println("There is no parent of the post")
 		} else if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Incorrect parent post ID"))
@@ -210,6 +212,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("Failed to create post"))
+			return
 		}
 
 		if parent_post_objid.IsZero() {
@@ -252,7 +255,6 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 	} else if r.Method == "GET" {
-
 		query := r.URL.Query()
 
 		if query.Has("username") {
@@ -301,7 +303,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Unable to get, provide username of ID"))
+			w.Write([]byte("Unable to get, provide username or ID"))
 		}
 
 	} else if r.Method == "DELETE" {
@@ -345,6 +347,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Incorrect Id provided"))
+			return
 		}
 
 		filter := bson.M{
@@ -355,6 +358,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Unable to read the Text"))
+			return
 		}
 
 		update := bson.M{
@@ -374,12 +378,10 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			w.Write([]byte("Modified successfully"))
 		}
-
 	}
 }
 
 func likeHandler(w http.ResponseWriter, r *http.Request) {
-
 	path := r.URL.Path
 
 	// Retrieve all request information
@@ -390,6 +392,7 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte("Invalid post id"))
+		return
 	}
 
 	username, ok := r.Context().Value("username").(string)
@@ -509,7 +512,6 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 	} else if path == UNLIKE_ROUTE {
 		w.Write([]byte("Unliked successfully"))
 	}
-
 }
 
 func followHandler(w http.ResponseWriter, r *http.Request) {
@@ -523,7 +525,22 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if trying to follow/unfollow self
+	if follower_username == followed_username {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Cannot follow/unfollow yourself"))
+		return
+	}
+
+	// Check if followed user exists
 	collection := db.GetCollection(constants.MAIN_DATABASE, constants.USERS_COLLECTION)
+	var followedUser schema.User
+	err := collection.FindOne(context.TODO(), bson.M{"username": followed_username}).Decode(&followedUser)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("User not found"))
+		return
+	}
 
 	filter_follower := bson.M{
 		"username": follower_username,
@@ -560,6 +577,10 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 				"followers": follower_username,
 			},
 		}
+	} else {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Invalid operation"))
+		return
 	}
 
 	client := db.GetClient()
@@ -607,6 +628,9 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("Operation successfully"))
-
+	if r.URL.Path == FOLLOW_ROUTE {
+		w.Write([]byte("Followed successfully"))
+	} else {
+		w.Write([]byte("Unfollowed successfully"))
+	}
 }
