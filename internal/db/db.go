@@ -85,7 +85,7 @@ func CreateDocument(collection *mongo.Collection, doc primitive.M) error {
 	return nil
 }
 
-func GetDocuments(collection *mongo.Collection, filter primitive.D) ([]bson.D, error) {
+func GetDocuments(collection *mongo.Collection, filter primitive.M) ([]bson.D, error) {
 
 	cursor, err := collection.Find(context.TODO(), filter)
 	if err != nil {

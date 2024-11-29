@@ -13,6 +13,7 @@ import (
 	"sashan/internal/db"
 	"sashan/internal/schema"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
@@ -41,6 +42,8 @@ func InitializeRoutes() *mux.Router {
 
 	router.Handle(FOLLOW_ROUTE, JwtAuthMiddleware(http.HandlerFunc(followHandler))).Methods("POST")
 	router.Handle(UNFOLLOW_ROUTE, JwtAuthMiddleware(http.HandlerFunc(followHandler))).Methods("POST")
+
+	router.Handle("/feed", JwtAuthMiddleware(http.HandlerFunc(feedHandler))).Methods("GET")
 
 	return router
 }
@@ -187,6 +190,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 			ID:         post_id,
 			Username:   username,
 			Text:       body.Text,
+			Timestamp:  time.Now().UTC(),
 			Likes:      0,
 			Childposts: []primitive.ObjectID{},
 			Parentpost: parent_post_objid,
@@ -259,8 +263,8 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 
 		if query.Has("username") {
 			username := query.Get("username")
-			filter := bson.D{
-				{Key: "username", Value: username},
+			filter := bson.M{
+				"username": username,
 			}
 			posts_primitive, err := db.GetDocuments(collection, filter)
 			posts := []map[string]interface{}{}
@@ -537,6 +541,7 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 	var followedUser schema.User
 	err := collection.FindOne(context.TODO(), bson.M{"username": followed_username}).Decode(&followedUser)
 	if err != nil {
+		fmt.Printf("Error is %v\n", err)
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte("User not found"))
 		return
@@ -633,4 +638,71 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Write([]byte("Unfollowed successfully"))
 	}
+}
+
+func feedHandler(w http.ResponseWriter, r *http.Request) {
+	username, ok := r.Context().Value("username").(string)
+	if !ok {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("failed to get feed"))
+		return
+	}
+
+	users_collection := db.GetCollection(constants.MAIN_DATABASE, constants.USERS_COLLECTION)
+	post_collection := db.GetCollection(constants.MAIN_DATABASE, constants.POSTS_COLLECTION)
+
+	filter := bson.M{
+		"username": username,
+	}
+
+	userinfo, err := db.GetDocument(users_collection, filter)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("failed to get feed"))
+		return
+	}
+
+	var User schema.User
+	user_byte, _ := bson.Marshal(userinfo)
+	err = bson.Unmarshal(user_byte, &User)
+	if err != nil {
+		fmt.Printf("Unable to parse user info: %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Unable to get feed"))
+		return
+	}
+	yesterday := time.Now().UTC().Add(-24 * time.Hour)
+
+	posts := []map[string]interface{}{}
+	following := User.Following
+	for _, user_followed := range following {
+		filter := bson.M{
+			"username": user_followed,
+			"timestamp": bson.M{
+				"$gte": yesterday,
+			},
+		}
+		posts_primitive, err := db.GetDocuments(post_collection, filter)
+		if err != nil {
+			fmt.Printf("Error getting post for %v, error: %v\n", user_followed, err)
+			continue
+		}
+
+		for _, post_primitive := range posts_primitive {
+			post_map := make(map[string]interface{})
+			for _, elem := range post_primitive {
+				post_map[elem.Key] = elem.Value
+			}
+			posts = append(posts, post_map)
+		}
+	}
+
+	if len(posts) == 0 {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("No posts fetched"))
+		return
+	}
+
+	w.Header().Set("Content-type", "application/json")
+	json.NewEncoder(w).Encode(posts)
 }
