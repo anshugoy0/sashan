@@ -17,6 +17,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -44,6 +45,7 @@ func InitializeRoutes() *mux.Router {
 	router.Handle(UNFOLLOW_ROUTE, JwtAuthMiddleware(http.HandlerFunc(followHandler))).Methods("POST")
 
 	router.Handle("/feed", JwtAuthMiddleware(http.HandlerFunc(feedHandler))).Methods("GET")
+	router.Handle("/message", JwtAuthMiddleware(http.HandlerFunc(handleMessages)))
 
 	return router
 }
@@ -705,4 +707,59 @@ func feedHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-type", "application/json")
 	json.NewEncoder(w).Encode(posts)
+}
+
+var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+
+var clients = make(map[string]*websocket.Conn)
+
+func handleMessages(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		fmt.Println("Error while upgrading connection:", err)
+		return
+	}
+	defer conn.Close()
+
+	username, ok := r.Context().Value("username").(string)
+	if !ok {
+		fmt.Println("No username provided in JWT")
+		return
+	}
+	clients[username] = conn
+
+	for {
+		_, msg, err := conn.ReadMessage()
+
+		if err != nil {
+			fmt.Println("unable to send message")
+			break
+		}
+		var payload schema.Message
+		err = json.Unmarshal(msg, &payload)
+		if err != nil {
+			fmt.Println("Unable to read message")
+			break
+		}
+		message := payload.Message
+		receiver := payload.Receiver
+
+		receiver_conn, ok := clients[receiver]
+		if !ok {
+			fmt.Println("Unable to get connection for receiver")
+			break
+		}
+
+		message_json := bson.M{
+			"sender":  username,
+			"message": message,
+		}
+
+		err = receiver_conn.WriteJSON(message_json)
+		if err != nil {
+			receiver_conn.Close()
+		}
+
+	}
+
 }
