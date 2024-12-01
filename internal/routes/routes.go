@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"sashan/internal/auth"
 	"sashan/internal/constants"
@@ -33,8 +32,8 @@ func InitializeRoutes() *mux.Router {
 	router := mux.NewRouter()
 
 	router.HandleFunc("/", homeHandler).Methods("GET")
-	router.HandleFunc("/signin", signinHandler).Methods("POST")
 	router.HandleFunc("/signup", signupHandler).Methods("POST")
+	router.HandleFunc("/signin", signinHandler).Methods("POST")
 
 	router.Handle("/post", JwtAuthMiddleware(http.HandlerFunc(postHandler))).Methods("POST", "GET", "DELETE", "PATCH")
 
@@ -54,13 +53,13 @@ func JwtAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			http.Error(w, "Authorization header missing", http.StatusUnauthorized)
+			http.Error(w, "authorization header missing", http.StatusUnauthorized)
 			return
 		}
 
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			http.Error(w, "Invalid authorization header format", http.StatusUnauthorized)
+			http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
 			return
 		}
 
@@ -75,18 +74,14 @@ func JwtAuthMiddleware(next http.Handler) http.Handler {
 			return secretKey, nil
 		})
 
-		if err != nil {
-			fmt.Println(err)
-		}
-
 		if err != nil || !token.Valid {
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
 		}
 
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
-			http.Error(w, "Claim Failed", http.StatusInternalServerError)
+			http.Error(w, "claim failed", http.StatusInternalServerError)
 			return
 		}
 		username := claims["username"]
@@ -99,29 +94,6 @@ func JwtAuthMiddleware(next http.Handler) http.Handler {
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Welcome to Sashan"))
-}
-
-func signinHandler(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-	username := query.Get("username")
-	password := query.Get("password")
-
-	collection := db.GetCollection(constants.MAIN_DATABASE, constants.USERS_COLLECTION)
-	usr, err := db.GetUser(collection, username, password)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	token, err := auth.GenerateJWT(username)
-	if err != nil {
-		fmt.Println(err.Error())
-		http.Error(w, "unable to signin", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"token": token, "msg": fmt.Sprintf("Signed in successfully to " + usr["username"].(string))})
 }
 
 func signupHandler(w http.ResponseWriter, r *http.Request) {
@@ -138,18 +110,48 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 		DOB:      dob,
 	}
 
-	primitive_user := primitive.D{
-		{Key: "username", Value: user.Username},
-		{Key: "password", Value: user.Password},
-		{Key: "dob", Value: user.DOB},
+	user_byte, err := bson.Marshal(user)
+	if err != nil {
+		http.Error(w, "unable to sign in", http.StatusInternalServerError)
+		return
 	}
 
-	err := db.PushUser(collection, primitive_user, username)
+	var User primitive.M
+	err = bson.Unmarshal(user_byte, User)
+	if err != nil {
+		http.Error(w, "unable to sign in", http.StatusInternalServerError)
+		return
+	}
+
+	err = db.PushUser(collection, User, username)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 	} else {
 		w.Write([]byte("signup successful for user " + username))
 	}
+}
+
+func signinHandler(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	username := query.Get("username")
+	password := query.Get("password")
+
+	collection := db.GetCollection(constants.MAIN_DATABASE, constants.USERS_COLLECTION)
+	usr, err := db.GetUser(collection, username, password)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	token, err := auth.GenerateJWT(username)
+	if err != nil {
+		fmt.Println("unable to generate jwt, err: ", err.Error())
+		http.Error(w, "unable to signin", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"token": token, "msg": fmt.Sprintf("Signed in successfully to " + usr["username"].(string))})
 }
 
 func postHandler(w http.ResponseWriter, r *http.Request) {
@@ -167,8 +169,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		var body schema.PostBody
 		err := json.NewDecoder(r.Body).Decode(&body)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("failed to post"))
+			http.Error(w, "failed to post", http.StatusInternalServerError)
 			return
 		}
 
@@ -206,20 +207,40 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Push post to DB
-		err = db.CreateDocument(collection, primitive_post)
+		client := db.GetClient()
+		session, err := client.StartSession()
 		if err != nil {
 			http.Error(w, "failed to create post", http.StatusInternalServerError)
 			return
 		}
 
+		defer session.EndSession(context.TODO())
+		err = session.StartTransaction()
+		if err != nil {
+			http.Error(w, "failed to create post", http.StatusInternalServerError)
+			return
+		}
+
+		// Push post to DB
+		_, err = collection.InsertOne(context.TODO(), primitive_post)
+		if err != nil {
+			session.AbortTransaction(context.TODO())
+			http.Error(w, "failed to create post", http.StatusInternalServerError)
+			return
+		}
+
 		if parent_post_objid.IsZero() {
+			err = session.CommitTransaction(context.TODO())
+			if err != nil {
+				http.Error(w, "failed to create post", http.StatusInternalServerError)
+				return
+			}
 			w.Write([]byte("New post created successfully"))
 			return
 		}
 
 		// Update parent post
-		child_update := bson.M{
+		parent_post_update := bson.M{
 			"$push": bson.M{
 				"cposts": post_id,
 			},
@@ -229,27 +250,21 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 			"_id": parent_post_objid,
 		}
 
-		result, err := db.UpdateDocument(collection, filter, child_update)
-
-		if err != nil {
-			http.Error(w, "unable to add post", http.StatusInternalServerError)
-
-			result_delete, err := db.DeleteDocument(collection, bson.M{"_id": post_id})
-			if err != nil {
-				fmt.Printf("Unable to revert post with id %v\n", post_id)
-			} else if result_delete.DeletedCount == 0 {
-				fmt.Println("Post is not deleted")
-			} else {
-				fmt.Printf("Post with ID %v got deleted\n", post_id)
-			}
-
+		result_update, err := collection.UpdateOne(context.TODO(), filter, parent_post_update)
+		if err != nil || result_update.ModifiedCount == 0 {
+			session.AbortTransaction(context.TODO())
+			http.Error(w, "failed to create post", http.StatusInternalServerError)
 			return
-		} else if result.ModifiedCount == 0 {
-			http.Error(w, "nothing got modified", http.StatusInternalServerError)
-		} else {
-			w.Write([]byte("Subpost created successfully"))
 		}
 
+		err = session.CommitTransaction(context.TODO())
+		if err != nil {
+			http.Error(w, "failed to create post", http.StatusInternalServerError)
+			return
+		}
+
+		w.Write([]byte("Subpost created successfully"))
+		return
 	} else if r.Method == "GET" {
 		query := r.URL.Query()
 
@@ -259,6 +274,10 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 				"username": username,
 			}
 			posts_primitive, err := db.GetDocuments(collection, filter)
+			if err != nil {
+				http.Error(w, "unable to get post", http.StatusInternalServerError)
+			}
+
 			posts := []map[string]interface{}{}
 			for _, post_primitive := range posts_primitive {
 				post_map := make(map[string]interface{})
@@ -268,12 +287,10 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 				posts = append(posts, post_map)
 			}
 
-			if err != nil {
-				http.Error(w, "unable to get post", http.StatusInternalServerError)
-			} else {
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(posts)
-			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(posts)
+			return
+
 		} else if query.Has("postid") {
 			id := query.Get("postid")
 			objId, err := primitive.ObjectIDFromHex(id)
@@ -290,14 +307,16 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 
 			if err != nil {
 				http.Error(w, "unable to fetch post", http.StatusInternalServerError)
-			} else {
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(post)
+				return
 			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(post)
+			return
 		} else {
 			http.Error(w, "unable to get user, provide username or id", http.StatusBadRequest)
+			return
 		}
-
 	} else if r.Method == "DELETE" {
 		query := r.URL.Query()
 		id := query.Get("postid")
@@ -310,6 +329,38 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 
 		filter := bson.M{
 			"_id": objId,
+		}
+
+		current_user, ok := r.Context().Value("username").(string)
+		if !ok {
+			http.Error(w, "can not get username", http.StatusInternalServerError)
+			return
+		}
+
+		post, err := db.GetDocument(collection, filter)
+		if err != nil {
+			http.Error(w, "no post with this id", http.StatusBadRequest)
+			return
+		}
+
+		post_byte, err := bson.Marshal(post)
+		if err != nil {
+			http.Error(w, "unable to delete post", http.StatusInternalServerError)
+			return
+		}
+
+		var Post schema.Post
+		err = bson.Unmarshal(post_byte, &Post)
+		if err != nil {
+			http.Error(w, "unable to delete post", http.StatusInternalServerError)
+			return
+		}
+
+		deleted_post_author := Post.Username
+
+		if deleted_post_author != current_user {
+			http.Error(w, "unauthorized to delete post", http.StatusUnauthorized)
+			return
 		}
 
 		result, err := db.DeleteDocument(collection, filter)
@@ -349,30 +400,28 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 
 		update := bson.M{
 			"$set": bson.M{
-				"text": text,
+				"text":      text,
+				"timestamp": time.Now().UTC(),
 			},
 		}
 
 		result, err := db.UpdateDocument(collection, filter, update)
 		if err != nil {
 			http.Error(w, "unable to update post", http.StatusInternalServerError)
-			return
 		} else if result.ModifiedCount == 0 {
 			http.Error(w, "nothing got modified", http.StatusInternalServerError)
 		} else {
 			w.Write([]byte("Modified successfully"))
 		}
+		return
 	}
 }
 
 func likeHandler(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
-
-	// Retrieve all request information
 	query := r.URL.Query()
 	postid := query.Get("postid")
 
-	objid, err := primitive.ObjectIDFromHex(postid) // Convert to useful form
+	objid, err := primitive.ObjectIDFromHex(postid)
 	if err != nil {
 		http.Error(w, "invalid post id", http.StatusBadRequest)
 		return
@@ -416,11 +465,12 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else {
-		fmt.Println("Not liked")
+		fmt.Println("Post is not liked")
 	}
 
 	var update_post bson.M
 	var update_user bson.M
+	path := r.URL.Path
 	if path == LIKE_ROUTE {
 		if isLiked {
 			w.Write([]byte("Post already liked"))
@@ -461,31 +511,36 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 	client := db.GetClient()
 	session, err := client.StartSession()
 	if err != nil {
-		log.Fatal(err)
+		http.Error(w, "unable to do the operation, err:"+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	defer session.EndSession(context.TODO())
 	err = session.StartTransaction()
 	if err != nil {
-		log.Fatal(err)
+		http.Error(w, "unable to do the operation, err:"+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	_, err = post_collection.UpdateOne(context.TODO(), filter_post, update_post)
 	if err != nil {
 		session.AbortTransaction(context.TODO())
-		log.Fatal(err)
+		http.Error(w, "unable to do the operation, err:"+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	// Update the user interaction info
 	_, err = user_collection.UpdateOne(context.TODO(), user_filter, update_user)
 	if err != nil {
 		session.AbortTransaction(context.TODO())
-		log.Fatal(err)
+		http.Error(w, "unable to do the operation, err:"+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	err = session.CommitTransaction(context.TODO())
 	if err != nil {
-		log.Fatal(err)
+		http.Error(w, "unable to do the operation, err:"+err.Error(), http.StatusInternalServerError)
+		return
 	}
 	if path == LIKE_ROUTE {
 		w.Write([]byte("Liked successfully"))
@@ -561,7 +616,6 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := db.GetClient()
-
 	session, err := client.StartSession()
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
@@ -585,8 +639,8 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = collection.UpdateOne(context.TODO(), filter_followed, update_followed)
-	if err != nil {
+	result, err := collection.UpdateOne(context.TODO(), filter_followed, update_followed)
+	if err != nil || result.ModifiedCount == 0 {
 		session.AbortTransaction(context.TODO())
 		fmt.Printf("Error: %v\n", err)
 		http.Error(w, "failed to follow", http.StatusInternalServerError)
@@ -640,6 +694,12 @@ func feedHandler(w http.ResponseWriter, r *http.Request) {
 
 	posts := []map[string]interface{}{}
 	following := User.Following
+
+	if len(following) == 0 {
+		http.Error(w, "you are not following anyone", http.StatusBadRequest)
+		return
+	}
+
 	for _, user_followed := range following {
 		filter := bson.M{
 			"username": user_followed,
@@ -663,7 +723,7 @@ func feedHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(posts) == 0 {
-		http.Error(w, "no posts fetched", http.StatusInternalServerError)
+		w.Write([]byte("your followers have not made any post"))
 		return
 	}
 
@@ -676,40 +736,61 @@ var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { retu
 var clients = make(map[string]*websocket.Conn)
 
 func handleMessages(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	sender_client, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		fmt.Println("Error while upgrading connection:", err)
 		return
 	}
-	defer conn.Close()
+	defer sender_client.Close()
 
 	username, ok := r.Context().Value("username").(string)
 	if !ok {
 		fmt.Println("No username provided in JWT")
 		return
 	}
-	clients[username] = conn
+	clients[username] = sender_client
 
 	for {
-		_, msg, err := conn.ReadMessage()
+		_, msg, err := sender_client.ReadMessage()
 
 		if err != nil {
-			fmt.Println("unable to send message")
-			break
+			fmt.Println("unable to send message", err)
+			message_error := bson.M{
+				"error": "unable to send message: " + err.Error(),
+			}
+			err = sender_client.WriteJSON(message_error)
+			if err != nil {
+				sender_client.Close()
+			}
+			continue
 		}
 		var payload schema.Message
 		err = json.Unmarshal(msg, &payload)
 		if err != nil {
-			fmt.Println("Unable to read message")
-			break
+			fmt.Println("unable to send message", err)
+			message_error := bson.M{
+				"error": "unable to send message: " + err.Error(),
+			}
+			err = sender_client.WriteJSON(message_error)
+			if err != nil {
+				sender_client.Close()
+			}
+			continue
 		}
 		message := payload.Message
 		receiver := payload.Receiver
 
-		receiver_conn, ok := clients[receiver]
+		receiver_client, ok := clients[receiver]
 		if !ok {
 			fmt.Println("Unable to get connection for receiver")
-			break
+			message_error := bson.M{
+				"error": "unable to connect to " + receiver,
+			}
+			err = sender_client.WriteJSON(message_error)
+			if err != nil {
+				sender_client.Close()
+			}
+			continue
 		}
 
 		message_json := bson.M{
@@ -717,11 +798,9 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 			"message": message,
 		}
 
-		err = receiver_conn.WriteJSON(message_json)
+		err = receiver_client.WriteJSON(message_json)
 		if err != nil {
-			receiver_conn.Close()
+			receiver_client.Close()
 		}
-
 	}
-
 }
