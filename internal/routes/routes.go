@@ -17,6 +17,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -145,7 +146,7 @@ func signinHandler(w http.ResponseWriter, r *http.Request) {
 
 	token, err := auth.GenerateJWT(username)
 	if err != nil {
-		fmt.Println("unable to generate jwt, err: ", err.Error())
+		log.Error().Msg(fmt.Sprintf("unable to generate jwt, err: %v", err.Error()))
 		http.Error(w, "unable to signin", http.StatusInternalServerError)
 		return
 	}
@@ -176,7 +177,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		parent_post_objid, err := primitive.ObjectIDFromHex(body.Parentpost)
 
 		if parent_post_objid.IsZero() {
-			fmt.Println("There is no parent of the post")
+			log.Info().Msg("There is no parent of the post")
 		} else if err != nil {
 			http.Error(w, "incorrect parent post id", http.StatusBadRequest)
 			return
@@ -451,7 +452,7 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 	user_bytes, _ := bson.Marshal(user)
 	err = bson.Unmarshal(user_bytes, &User)
 	if err != nil {
-		fmt.Printf("Unable to parse user info: %v\n", err)
+		log.Error().Msg(fmt.Sprintf("Unable to parse user info, err: %v", err))
 		http.Error(w, "unable to like post", http.StatusInternalServerError)
 		return
 	}
@@ -465,7 +466,7 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else {
-		fmt.Println("Post is not liked")
+		log.Info().Msg("Post is not liked")
 	}
 
 	var update_post bson.M
@@ -570,7 +571,7 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 	var followedUser schema.User
 	err := collection.FindOne(context.TODO(), bson.M{"username": followed_username}).Decode(&followedUser)
 	if err != nil {
-		fmt.Printf("Error is %v\n", err)
+		log.Error().Msg(fmt.Sprintf("Error: %v", err))
 		http.Error(w, "user not found", http.StatusNotFound)
 		return
 	}
@@ -618,7 +619,7 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 	client := db.GetClient()
 	session, err := client.StartSession()
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		log.Error().Msg(fmt.Sprintf("Error: %v", err))
 		http.Error(w, "failed to follow", http.StatusInternalServerError)
 		return
 	}
@@ -626,7 +627,7 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 
 	err = session.StartTransaction()
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		log.Error().Msg(fmt.Sprintf("Error: %v", err))
 		http.Error(w, "failed to follow", http.StatusInternalServerError)
 		return
 	}
@@ -634,7 +635,7 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 	_, err = collection.UpdateOne(context.TODO(), filter_follower, update_follower)
 	if err != nil {
 		session.AbortTransaction(context.TODO())
-		fmt.Printf("Error: %v\n", err)
+		log.Error().Msg(fmt.Sprintf("Error: %v", err))
 		http.Error(w, "failed to follow", http.StatusInternalServerError)
 		return
 	}
@@ -642,14 +643,14 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 	result, err := collection.UpdateOne(context.TODO(), filter_followed, update_followed)
 	if err != nil || result.ModifiedCount == 0 {
 		session.AbortTransaction(context.TODO())
-		fmt.Printf("Error: %v\n", err)
+		log.Error().Msg(fmt.Sprintf("Error: %v", err))
 		http.Error(w, "failed to follow", http.StatusInternalServerError)
 		return
 	}
 
 	err = session.CommitTransaction(context.TODO())
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		log.Error().Msg(fmt.Sprintf("Error: %v", err))
 		http.Error(w, "failed to follow", http.StatusInternalServerError)
 		return
 	}
@@ -686,7 +687,7 @@ func feedHandler(w http.ResponseWriter, r *http.Request) {
 	user_byte, _ := bson.Marshal(userinfo)
 	err = bson.Unmarshal(user_byte, &User)
 	if err != nil {
-		fmt.Printf("Unable to parse user info: %v\n", err)
+		log.Error().Msg(fmt.Sprintf("Unable to parse user info, err: %v", err))
 		http.Error(w, "unable to get feed", http.StatusInternalServerError)
 		return
 	}
@@ -709,7 +710,7 @@ func feedHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		posts_primitive, err := db.GetDocuments(post_collection, filter)
 		if err != nil {
-			fmt.Printf("Error getting post for %v, error: %v\n", user_followed, err)
+			log.Error().Msg(fmt.Sprintf("Error getting post for %v, err: %v", user_followed, err.Error()))
 			continue
 		}
 
@@ -738,14 +739,14 @@ var clients = make(map[string]*websocket.Conn)
 func handleMessages(w http.ResponseWriter, r *http.Request) {
 	sender_client, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		fmt.Println("Error while upgrading connection:", err)
+		log.Error().Msg(fmt.Sprintf("Error while upgrading connection, err: %v", err.Error()))
 		return
 	}
 	defer sender_client.Close()
 
 	username, ok := r.Context().Value("username").(string)
 	if !ok {
-		fmt.Println("No username provided in JWT")
+		log.Error().Msg("No username provided in JWT")
 		return
 	}
 	clients[username] = sender_client
@@ -754,7 +755,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		_, msg, err := sender_client.ReadMessage()
 
 		if err != nil {
-			fmt.Println("unable to send message", err)
+			log.Error().Msg(fmt.Sprintf("unable to send message, err: %v", err.Error()))
 			message_error := bson.M{
 				"error": "unable to send message: " + err.Error(),
 			}
@@ -767,7 +768,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		var payload schema.Message
 		err = json.Unmarshal(msg, &payload)
 		if err != nil {
-			fmt.Println("unable to send message", err)
+			log.Error().Msg(fmt.Sprintf("unable to send message, err: %v", err.Error()))
 			message_error := bson.M{
 				"error": "unable to send message: " + err.Error(),
 			}
@@ -782,7 +783,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 
 		receiver_client, ok := clients[receiver]
 		if !ok {
-			fmt.Println("Unable to get connection for receiver")
+			log.Error().Msg("Unable to get connection for receiver")
 			message_error := bson.M{
 				"error": "unable to connect to " + receiver,
 			}
