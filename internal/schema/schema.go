@@ -34,3 +34,8 @@ type PostBody struct {
 	Text       string `bson:"text"`
 	Parentpost string `bson:"ppost,omitempty"`
 }
+
+type Message struct {
+	Receiver string `bson:"receiver"`
+	Message  string `bson:"message"`
+}

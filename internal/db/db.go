@@ -29,7 +29,7 @@ func GetCollection(database string, colname string) *mongo.Collection {
 	return client.Database(database).Collection(colname)
 }
 
-func PushUser(collection *mongo.Collection, user bson.D, username string) error {
+func PushUser(collection *mongo.Collection, user bson.M, username string) error {
 
 	var result bson.M
 	filter := bson.D{
