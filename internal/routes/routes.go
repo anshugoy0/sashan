@@ -109,16 +109,14 @@ func signinHandler(w http.ResponseWriter, r *http.Request) {
 	collection := db.GetCollection(constants.MAIN_DATABASE, constants.USERS_COLLECTION)
 	usr, err := db.GetUser(collection, username, password)
 	if err != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(err.Error()))
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
 	token, err := auth.GenerateJWT(username)
 	if err != nil {
 		fmt.Println(err.Error())
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Unable to SignIn"))
+		http.Error(w, "unable to signin", http.StatusInternalServerError)
 		return
 	}
 
@@ -148,8 +146,7 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 
 	err := db.PushUser(collection, primitive_user, username)
 	if err != nil {
-		w.WriteHeader(http.StatusConflict)
-		w.Write([]byte(err.Error()))
+		http.Error(w, err.Error(), http.StatusConflict)
 	} else {
 		w.Write([]byte("signup successful for user " + username))
 	}
@@ -159,8 +156,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 	username, ok := r.Context().Value("username").(string)
 
 	if !ok {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("failed to post"))
+		http.Error(w, "failed to post", http.StatusInternalServerError)
 		return
 	}
 
@@ -181,8 +177,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		if parent_post_objid.IsZero() {
 			fmt.Println("There is no parent of the post")
 		} else if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Incorrect parent post ID"))
+			http.Error(w, "incorrect parent post id", http.StatusBadRequest)
 			return
 		}
 
@@ -200,24 +195,21 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 
 		bsondata, err := bson.Marshal(post)
 		if err != nil {
-			fmt.Println("Unable to parse post: ", err)
-			w.WriteHeader(http.StatusInternalServerError)
+			http.Error(w, "unable to parse post, err: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		var primitive_post primitive.M
 		err = bson.Unmarshal(bsondata, &primitive_post)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Invalid input"))
+			http.Error(w, "invalid input", http.StatusBadRequest)
 			return
 		}
 
 		// Push post to DB
 		err = db.CreateDocument(collection, primitive_post)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Failed to create post"))
+			http.Error(w, "failed to create post", http.StatusInternalServerError)
 			return
 		}
 
@@ -240,8 +232,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		result, err := db.UpdateDocument(collection, filter, child_update)
 
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Unable to add post"))
+			http.Error(w, "unable to add post", http.StatusInternalServerError)
 
 			result_delete, err := db.DeleteDocument(collection, bson.M{"_id": post_id})
 			if err != nil {
@@ -254,8 +245,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 
 			return
 		} else if result.ModifiedCount == 0 {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Nothing got modified"))
+			http.Error(w, "nothing got modified", http.StatusInternalServerError)
 		} else {
 			w.Write([]byte("Subpost created successfully"))
 		}
@@ -279,8 +269,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte("Unable to get post"))
+				http.Error(w, "unable to get post", http.StatusInternalServerError)
 			} else {
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(posts)
@@ -289,8 +278,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 			id := query.Get("postid")
 			objId, err := primitive.ObjectIDFromHex(id)
 			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte("Incorrect ID"))
+				http.Error(w, "incorrect id", http.StatusBadRequest)
 				return
 			}
 
@@ -301,15 +289,13 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 			post, err := db.GetDocument(collection, filter)
 
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte("Unable to fetch post"))
+				http.Error(w, "unable to fetch post", http.StatusInternalServerError)
 			} else {
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(post)
 			}
 		} else {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Unable to get, provide username or ID"))
+			http.Error(w, "unable to get user, provide username or id", http.StatusBadRequest)
 		}
 
 	} else if r.Method == "DELETE" {
@@ -318,8 +304,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 
 		objId, err := primitive.ObjectIDFromHex(id)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Incorrect ID provided"))
+			http.Error(w, "incorrect id provided", http.StatusBadRequest)
 			return
 		}
 
@@ -330,11 +315,9 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		result, err := db.DeleteDocument(collection, filter)
 
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Unable to delete"))
+			http.Error(w, "unable to delete", http.StatusInternalServerError)
 		} else if result != nil && result.DeletedCount == 0 {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Nothing got deleted"))
+			http.Error(w, "nothing got deleted", http.StatusBadRequest)
 		} else {
 			w.Write([]byte("Successfully deleted"))
 		}
@@ -344,15 +327,13 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		var body bson.M
 		err := json.NewDecoder(r.Body).Decode(&body)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Check request parameters"))
+			http.Error(w, "check request parameters", http.StatusBadRequest)
 			return
 		}
 
 		objId, err := primitive.ObjectIDFromHex(id)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Incorrect Id provided"))
+			http.Error(w, "incorrect id provided", http.StatusBadRequest)
 			return
 		}
 
@@ -362,8 +343,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 
 		text, ok := body["Text"]
 		if !ok {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Unable to read the Text"))
+			http.Error(w, "unable to read the text", http.StatusBadRequest)
 			return
 		}
 
@@ -375,12 +355,10 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 
 		result, err := db.UpdateDocument(collection, filter, update)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Unable to update post"))
+			http.Error(w, "unable to update post", http.StatusInternalServerError)
 			return
 		} else if result.ModifiedCount == 0 {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Nothing got modified"))
+			http.Error(w, "nothing got modified", http.StatusInternalServerError)
 		} else {
 			w.Write([]byte("Modified successfully"))
 		}
@@ -396,15 +374,13 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 
 	objid, err := primitive.ObjectIDFromHex(postid) // Convert to useful form
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Invalid post id"))
+		http.Error(w, "invalid post id", http.StatusBadRequest)
 		return
 	}
 
 	username, ok := r.Context().Value("username").(string)
 	if !ok {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("failed to post"))
+		http.Error(w, "failed to post", http.StatusInternalServerError)
 		return
 	}
 
@@ -418,8 +394,7 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 
 	user, err := db.GetDocument(user_collection, user_filter)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Unable to find user"))
+		http.Error(w, "unable to find user", http.StatusInternalServerError)
 		return
 	}
 
@@ -428,8 +403,7 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 	err = bson.Unmarshal(user_bytes, &User)
 	if err != nil {
 		fmt.Printf("Unable to parse user info: %v\n", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Unable to Like post"))
+		http.Error(w, "unable to like post", http.StatusInternalServerError)
 		return
 	}
 
@@ -526,15 +500,13 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 	followed_username := query.Get("username")
 
 	if !ok {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Failed to follow"))
+		http.Error(w, "failed to follow", http.StatusInternalServerError)
 		return
 	}
 
 	// Check if trying to follow/unfollow self
 	if follower_username == followed_username {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Cannot follow/unfollow yourself"))
+		http.Error(w, "cannot follow/unfollow yourself", http.StatusBadRequest)
 		return
 	}
 
@@ -544,8 +516,7 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 	err := collection.FindOne(context.TODO(), bson.M{"username": followed_username}).Decode(&followedUser)
 	if err != nil {
 		fmt.Printf("Error is %v\n", err)
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("User not found"))
+		http.Error(w, "user not found", http.StatusNotFound)
 		return
 	}
 
@@ -585,8 +556,7 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 			},
 		}
 	} else {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Invalid operation"))
+		http.Error(w, "invalid operation", http.StatusBadRequest)
 		return
 	}
 
@@ -595,8 +565,7 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 	session, err := client.StartSession()
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Failed to follow"))
+		http.Error(w, "failed to follow", http.StatusInternalServerError)
 		return
 	}
 	defer session.EndSession(context.TODO())
@@ -604,8 +573,7 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 	err = session.StartTransaction()
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Failed to follow"))
+		http.Error(w, "failed to follow", http.StatusInternalServerError)
 		return
 	}
 
@@ -613,8 +581,7 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		session.AbortTransaction(context.TODO())
 		fmt.Printf("Error: %v\n", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Failed to follow"))
+		http.Error(w, "failed to follow", http.StatusInternalServerError)
 		return
 	}
 
@@ -622,16 +589,14 @@ func followHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		session.AbortTransaction(context.TODO())
 		fmt.Printf("Error: %v\n", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Failed to follow"))
+		http.Error(w, "failed to follow", http.StatusInternalServerError)
 		return
 	}
 
 	err = session.CommitTransaction(context.TODO())
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Failed to follow"))
+		http.Error(w, "failed to follow", http.StatusInternalServerError)
 		return
 	}
 
@@ -659,8 +624,7 @@ func feedHandler(w http.ResponseWriter, r *http.Request) {
 
 	userinfo, err := db.GetDocument(users_collection, filter)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("failed to get feed"))
+		http.Error(w, "failed to get feed", http.StatusInternalServerError)
 		return
 	}
 
@@ -669,8 +633,7 @@ func feedHandler(w http.ResponseWriter, r *http.Request) {
 	err = bson.Unmarshal(user_byte, &User)
 	if err != nil {
 		fmt.Printf("Unable to parse user info: %v\n", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Unable to get feed"))
+		http.Error(w, "unable to get feed", http.StatusInternalServerError)
 		return
 	}
 	yesterday := time.Now().UTC().Add(-24 * time.Hour)
@@ -700,8 +663,7 @@ func feedHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(posts) == 0 {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("No posts fetched"))
+		http.Error(w, "no posts fetched", http.StatusInternalServerError)
 		return
 	}
 
