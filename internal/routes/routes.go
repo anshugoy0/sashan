@@ -106,6 +106,7 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 	collection := db.GetCollection(constants.MAIN_DATABASE, constants.USERS_COLLECTION)
 
 	user := schema.User{
+		ID:       primitive.NewObjectID(),
 		Username: username,
 		Password: password,
 		DOB:      dob,
@@ -113,13 +114,15 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 
 	user_byte, err := bson.Marshal(user)
 	if err != nil {
+		log.Error().Msg(fmt.Sprintf("Faild to marshal, err: %v", err.Error()))
 		http.Error(w, "unable to sign in", http.StatusInternalServerError)
 		return
 	}
 
 	var User primitive.M
-	err = bson.Unmarshal(user_byte, User)
+	err = bson.Unmarshal(user_byte, &User)
 	if err != nil {
+		log.Error().Msg(fmt.Sprintf("Faild to unmarshal, err: %v", err.Error()))
 		http.Error(w, "unable to sign in", http.StatusInternalServerError)
 		return
 	}
@@ -307,6 +310,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 			post, err := db.GetDocument(collection, filter)
 
 			if err != nil {
+				log.Error().Msg(fmt.Sprintf("unable to fetch post, err: %v", err.Error()))
 				http.Error(w, "unable to fetch post", http.StatusInternalServerError)
 				return
 			}
@@ -393,7 +397,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 			"_id": objId,
 		}
 
-		text, ok := body["Text"]
+		text, ok := body["text"]
 		if !ok {
 			http.Error(w, "unable to read the text", http.StatusBadRequest)
 			return
@@ -458,8 +462,8 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	isLiked := false
-	if len(User.Interactions.LikedPosts) != 0 {
-		likedposts := User.Interactions.LikedPosts
+	if len(User.LikedPosts) != 0 {
+		likedposts := User.LikedPosts
 		for _, s := range likedposts {
 			if s == objid {
 				isLiked = true
@@ -484,7 +488,7 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		update_user = bson.M{
 			"$push": bson.M{
-				"interactions.likedposts": objid,
+				"likedposts": objid,
 			},
 		}
 	} else if path == UNLIKE_ROUTE {
@@ -499,7 +503,7 @@ func likeHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		update_user = bson.M{
 			"$pull": bson.M{
-				"interactions.likedposts": objid,
+				"likedposts": objid,
 			},
 		}
 	}

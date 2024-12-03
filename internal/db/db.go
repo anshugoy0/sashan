@@ -44,7 +44,7 @@ func PushUser(collection *mongo.Collection, user bson.M, username string) error 
 		if err != nil {
 			return err
 		}
-		log.Error().Msg(fmt.Sprintf("Inserted document with ID %v\n", result.InsertedID))
+		log.Debug().Msg(fmt.Sprintf("Inserted document with ID %v", result.InsertedID))
 		return nil
 	} else if err != nil {
 		return err
@@ -82,7 +82,7 @@ func CreateDocument(collection *mongo.Collection, doc primitive.M) error {
 	if err != nil {
 		return err
 	}
-	log.Debug().Msg(fmt.Sprintf("document created with ID %v\n", result.InsertedID))
+	log.Debug().Msg(fmt.Sprintf("document created with ID %v", result.InsertedID))
 	return nil
 }
 
