@@ -6,7 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+
+	"github.com/rs/zerolog/log"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -21,7 +22,8 @@ func Connect(uri string) {
 	client, err = mongo.Connect(context.TODO(), options.Client().ApplyURI(uri))
 
 	if err != nil {
-		fmt.Printf("Failed to connect to database at %v", uri)
+		log.Error().Msg(fmt.Sprintf("Failed to connect to database at %v", uri))
+
 	}
 }
 
@@ -29,7 +31,7 @@ func GetCollection(database string, colname string) *mongo.Collection {
 	return client.Database(database).Collection(colname)
 }
 
-func PushUser(collection *mongo.Collection, user bson.D, username string) error {
+func PushUser(collection *mongo.Collection, user bson.M, username string) error {
 
 	var result bson.M
 	filter := bson.D{
@@ -42,7 +44,7 @@ func PushUser(collection *mongo.Collection, user bson.D, username string) error 
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Inserted document with ID %v\n", result.InsertedID)
+		log.Debug().Msg(fmt.Sprintf("Inserted document with ID %v", result.InsertedID))
 		return nil
 	} else if err != nil {
 		return err
@@ -70,7 +72,7 @@ func GetUser(collection *mongo.Collection, username string, password string) (bs
 
 func Disconnect() {
 	if err := client.Disconnect(context.TODO()); err != nil {
-		log.Fatal(err)
+		log.Error().Msg(fmt.Sprintf("Unable to disconnect to mongodb, err: %v", err))
 	}
 }
 
@@ -80,8 +82,7 @@ func CreateDocument(collection *mongo.Collection, doc primitive.M) error {
 	if err != nil {
 		return err
 	}
-
-	fmt.Printf("document created with ID %v\n", result.InsertedID)
+	log.Debug().Msg(fmt.Sprintf("document created with ID %v", result.InsertedID))
 	return nil
 }
 

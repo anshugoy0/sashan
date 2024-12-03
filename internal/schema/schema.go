@@ -7,17 +7,13 @@ import (
 )
 
 type User struct {
-	ID           primitive.ObjectID `bson:"_id"`
-	Username     string             `bson:"username"`
-	Password     string             `bson:"password"`
-	DOB          string             `bson:"dob"`
-	Interactions Interaction        `bson:"interactions"`
-	Followers    []string           `bson:"followers"`
-	Following    []string           `bson:"following"`
-}
-
-type Interaction struct {
-	LikedPosts []primitive.ObjectID `bson:"likedposts"`
+	ID         primitive.ObjectID   `bson:"_id"`
+	Username   string               `bson:"username"`
+	Password   string               `bson:"password"`
+	DOB        string               `bson:"dob"`
+	LikedPosts []primitive.ObjectID `bson:"likedposts,omitempty"`
+	Followers  []string             `bson:"followers,omitempty"`
+	Following  []string             `bson:"following,omitempty"`
 }
 
 type Post struct {
@@ -31,6 +27,11 @@ type Post struct {
 }
 
 type PostBody struct {
-	Text       string `bson:"text"`
-	Parentpost string `bson:"ppost,omitempty"`
+	Text       string `json:"text"`
+	Parentpost string `json:"parentid"`
+}
+
+type Message struct {
+	Receiver string `json:"receiver"`
+	Message  string `json:"message"`
 }
