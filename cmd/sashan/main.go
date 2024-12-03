@@ -19,7 +19,7 @@ func main() {
 	log.Info().Msg("Sashan program initiated")
 	router := routes.InitializeRoutes()
 
-	uri := constants.MONGODB_URI
+	uri := os.Getenv(constants.ENV_MONGODB_URI)
 	db.Connect(uri)
 	defer db.Disconnect()
 

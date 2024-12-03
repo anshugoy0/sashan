@@ -9,11 +9,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-const PRIVATE_KEY = "/home/anshugoy/sashan/private-key.pem"
-const PUBLIC_KEY = "/home/anshugoy/sashan/public-key.pem"
+const ENV_PRIVATE_KEY = "SA_PRIVATE_KEY"
+const ENV_PUBLIC_KEY = "SA_PUBLIC_KEY"
 
 func GenerateJWT(username string) (string, error) {
-	var filePath string = PRIVATE_KEY
+	var filePath string = os.Getenv(ENV_PRIVATE_KEY)
 	token := jwt.NewWithClaims(jwt.SigningMethodES256,
 		jwt.MapClaims{
 			"iss":      "sashan.org",
@@ -45,7 +45,7 @@ func GenerateJWT(username string) (string, error) {
 }
 
 func ParsePublicKey() (any, error) {
-	var filePath string = PUBLIC_KEY
+	var filePath string = os.Getenv(ENV_PUBLIC_KEY)
 	keydata, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("can not read file: %v, err: %v", filePath, err)
